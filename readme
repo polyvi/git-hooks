@@ -1,3 +1,12 @@
-This is the hook collection for git used by polyvi daily developement.
+## This is the hook collection for git used by polyvi daily development.
 
-Every hook should be in a separate dir, with source and a readme file.
+## Every hook should be in a separate dir, with source and a readme file.
+
+## How to install hooks?
+1. clone this repo at a fixed location
+2. cd into your project repo
+3. run command at the root of your project repo
+    ln -s path/to/hooks-repo/pre-commit/pre-commit.sh .git/hooks/pre-commit
+4. now installation done
+
+## For Windows users, you should have a bash or bash compatible environment
