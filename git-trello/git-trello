@@ -16,7 +16,6 @@ var spawn = require('child_process').spawn;
 var gitweb_addr = 'http://git.polyvi.com/gitweb/';
 var log_data = "";
 var repo_name = "";
-var trello_lists;
 var trello_match;
 var list_id;
 var card_short_id;
@@ -35,7 +34,6 @@ var timer;
 var retry_times = 4;
 var current_loop = 1;
 var elapsed = 0;
-var trello_lists_storage_id = 'trello_lists' + board_id;
 var query_callback_is_called = false;
 var log_progress = false;
 var commitBranch;
@@ -172,9 +170,6 @@ function quit(){
 }
 
 function retry(){
-  if(!trello_lists){
-    get_lists(board_id, get_lists_callback);
-  }
   if(!card_long_id){
     get_card(board_id, card_short_id, get_card_callback);
   }
