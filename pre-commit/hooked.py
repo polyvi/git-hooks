@@ -2,6 +2,7 @@
 import os
 import shutil
 import stat
+import sys
 
 from distutils import dir_util
 from optparse import OptionParser
@@ -96,3 +97,4 @@ if __name__ == "__main__":
     else:
         copy_action_dir_to_dotgit(options)
         copy_git_hooks_to_dotgit(options)
+        print "Done hook installation at " + options.gitroot
