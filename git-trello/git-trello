@@ -191,6 +191,18 @@ function move_card(){
     info('Trello Card #' + card_short_id + ' is already in list "' +  list_name +'"!' );
     return;
   }
+  
+  var destListIndex = find_list_index_via_id(list_id);
+  var currentListIndex = find_list_index_via_id(current_list_id);
+  if(currentListIndex === undefined){
+    warn("[ERROR] Could not find the index for Trello List #" + current_list_id);
+    return;
+  }
+  if(destListIndex < currentListIndex){
+    warn('Trello Card #' + card_short_id + ' will not be downgraded from "' + find_list_name_via_id(current_list_id)  + '" to "' +  list_name +'"!' );
+    return;
+  }
+
   move_over = false;
   update_card(card_long_id, {idList:list_id}, function(err, data){
     if(err) throw err;
@@ -270,6 +282,7 @@ function find_list_id_via_name(list_name){
   for (i = 0; i < trello_lists.length; i++){
     if(list_name.toLowerCase() === trello_lists[i].name.toLowerCase()){
       list_id = trello_lists[i].id;
+      break;
     }
   }
   return list_id;
@@ -278,11 +291,23 @@ function find_list_id_via_name(list_name){
 function find_list_name_via_id(list_id){
   var list_name;
   for (i = 0; i < trello_lists.length; i++){
-    if(list_id.toLowerCase() === trello_lists[i].id.toLowerCase()){
+    if(list_id === trello_lists[i].id){
       list_name = trello_lists[i].name;
+      break;
     }
   }
   return list_name;
+}
+
+function find_list_index_via_id(list_id){
+  var index;
+  for (i = 0; i < trello_lists.length; i++){
+    if(list_id === trello_lists[i].id){
+      index = i;
+      break;
+    }
+  }
+  return index;
 }
 
 var partition      = "--------------------------------------------------------------";
