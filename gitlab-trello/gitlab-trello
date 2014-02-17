@@ -1,0 +1,363 @@
+#!/usr/bin/env node
+//please generate your app key from
+//https://trello.com/1/appKey/generate
+//please requist your app token from
+//https://trello.com/1/connect?key=yourkey&name=xface-3&expiration=never&response_type=token&scope=read,write
+var key = "0daef58ef3277177fb18fb9cd77070e8";
+var token = "d3fad052c71314ba9a1a293cb9ea84d02470160c87f43bb889d5bb7b5cd2cf4e";
+//xface-3 board:https://trello.com/board/-/5112231876087abe0a006a87
+var board_id = "5112231876087abe0a006a87";
+
+var Trello = require("node-trello");
+var t = new Trello(key, token);
+var exec = require('child_process').exec;
+var spawn = require('child_process').spawn;
+
+var gitweb_addr = 'http://gitlab.polyvi.com/xface/';
+var log_data = "";
+var repo_name = "";
+var trello_match;
+var list_id;
+var card_short_id;
+var card_long_id;
+var card_link;
+var current_closed_flag;
+var current_list_id;
+var move_over = true;
+var comment_over = false;
+var close_over = true;
+var timeout = 1000;
+var time_interval = 500;
+var timeout_increment = 500;
+var start_time;
+var timer;
+var retry_times = 4;
+var current_loop = 1;
+var elapsed = 0;
+var query_callback_is_called = false;
+var log_progress = false;
+var commitBranch;
+var git_log;
+var ref;
+var trello_lists = [{"id":"5147d4203db401a67f0010a3","name":"Internal Wishlist"},
+{"id":"5112231876087abe0a006a88","name":"To Do"},
+{"id":"5112231876087abe0a006a89","name":"Doing"},
+{"id":"5112231876087abe0a006a8a","name":"Done"}];
+
+function start(){
+	ref = process.argv[4];
+	commitBranch = ref.replace('refs/heads/', '');
+	git_log = spawn('git', ['log' , commitBranch, '-1' , '--decorate=full']);
+}
+
+start();
+
+git_log.stdout.on('data',function(d){
+  log_data += d;
+});
+
+git_log.stderr.on('data', function (data) {
+  console.log('Failed to get git log: ' + data);
+});
+
+git_log.on('close', git_log_exit_callback);
+
+function git_log_exit_callback(){
+  trello_match = log_data.match(/\[(.+)-([0-9]+)\](.+)/i);
+  if(trello_match){
+    start_time = new Date().getTime();
+    check_list_id();
+
+    //get trello card
+    card_short_id = trello_match[2];
+    get_card(board_id, card_short_id, get_card_callback);
+
+    get_repo_name();
+
+    setTimer();
+  }
+}
+
+function get_repo_name(){
+  exec('basename `pwd`',{}, get_repo_name_callback);
+}
+
+function check_list_id(){
+  var cmd = trello_match[1];
+
+  //check list id
+  list_id = find_list_id_via_name(cmd);
+  if(!list_id && !is_close_cmd(cmd)){
+    warn("[ERROR] Invalid list name: " + cmd);
+    quit();
+    return;
+  }
+  if(!list_id) list_id = find_list_id_via_name('done');
+}
+
+function get_card_callback(err, data){
+  if(err) throw err;
+  timeout += timeout_increment;
+  card_long_id = data['id'];
+  card_link = data['shortUrl'];
+  current_closed_flag = data['closed'];
+  current_list_id = data['idList'];
+
+  if(!card_long_id){
+    warn("[ERROR] Could not find the Trello Card #" + card_short_id);
+    quit();
+    return;
+  }
+
+  query_callback();
+}
+
+function get_repo_name_callback(err, stdout, stderr){
+  if(err) throw err;
+  repo_name += stdout;
+  repo_name = repo_name.replace(/\n$/, '');
+
+  query_callback();
+}
+
+function query_callback(){
+  if(!repo_name || !card_long_id || !list_id || query_callback_is_called){
+    return;
+  }
+
+  query_callback_is_called = true;
+  move_card();
+  comment_card();
+  close_card();
+}
+
+function setTimer(){
+  timer = setInterval(time_interval_fun, time_interval);
+}
+
+function time_interval_fun(){
+  if(clearTimer()){
+    info_star('Congratulations! Updated Trello Card #' + card_short_id + '\nPlease check it: ' + card_link);
+    process.exit(0);
+  }else{
+    var current_loop_elapsed = new Date().getTime() - start_time;
+    if(timeout <= current_loop_elapsed){
+      elapsed += current_loop_elapsed;
+      if(retry_times <= current_loop){
+        warn('Sorry, timeout(' + elapsed + '), we have to kill it....');
+        process.exit(1);
+      }else{
+        start_time = new Date().getTime();
+        current_loop++;
+        timeout = current_loop * 1200;
+        retry();
+      }
+    }
+  }
+}
+
+function clearTimer(){
+  if(move_over && close_over && comment_over){
+    clearInterval(timer);
+    return true;
+  }
+  return false;
+}
+
+function quit(){
+  clearInterval(timer);
+  process.exit(0);
+}
+
+function retry(){
+  if(!card_long_id){
+    get_card(board_id, card_short_id, get_card_callback);
+  }
+  if(!move_over){
+    move_card();
+  }
+  if(!close_over){
+    close_card();
+  }
+  if(trello_lists && card_long_id && move_over && close_over && !comment_over){
+    //invoke this at last to make sure comment is added for only once
+    comment_card();
+  }
+}
+
+function move_card(){
+  var list_name = find_list_name_via_id(list_id);
+  if(current_list_id === list_id){
+    info('Trello Card #' + card_short_id + ' is already in list "' +  list_name +'"!' );
+    return;
+  }
+  
+  var destListIndex = find_list_index_via_id(list_id);
+  var currentListIndex = find_list_index_via_id(current_list_id);
+  if(currentListIndex === undefined){
+    warn("[ERROR] Could not find the index for Trello List #" + current_list_id);
+    return;
+  }
+  if(destListIndex < currentListIndex){
+    warn('Trello Card #' + card_short_id + ' will not be downgraded from "' + find_list_name_via_id(current_list_id)  + '" to "' +  list_name +'"!' );
+    return;
+  }
+
+  move_over = false;
+  update_card(card_long_id, {idList:list_id}, function(err, data){
+    if(err) throw err;
+    else{
+      timeout += timeout_increment;
+      info('Moved Trello Card #' + card_short_id + ' "' + data.name + '" to list "' + list_name + '"');
+      move_over = true;
+    }
+  });
+}
+
+function comment_card(){
+  var text = gen_comment();
+  add_comment(card_long_id, text, function (err, data){
+    if(err) throw err;
+    if(data.data){
+      timeout += timeout_increment;
+      info('Added a comment for Trello Card #' + card_short_id + ' "' + data.data.card.name + '": \n' + data.data.text);
+      comment_over = true;
+      time_interval_fun();
+    }
+  });
+}
+
+function close_card(){
+  var cmd = trello_match[1];
+  if(!is_close_cmd(cmd)){
+    return;
+  }
+
+  if(current_closed_flag){
+    info('Trello Card #' + card_short_id + ' is already archived!' );
+    return;
+  }
+  close_over = false;
+  update_card(card_long_id, {closed:true}, function (err, data){
+    if(err) throw err;
+    else{
+      timeout += timeout_increment;
+      close_over = true;
+      if(data.closed){
+        info('Archived Trello Card #' + data.idShort + ' "' + data.name + '"');
+      }else{
+        warn('Failed to close/archive Trello Card #' + data.idShort + ' "' + data.name + '"');
+      }
+    }
+  });
+}
+
+function is_close_cmd(cmd){
+  return cmd.toLowerCase() === "close" || cmd.toLowerCase() === "archive";
+}
+
+function gen_comment(){
+  var commit_line = log_data.match(/commit\s+(.+)/i)[1];
+  var commit = commit_line.match(/(.+)\s+\(/)[1];
+  var branch = ref;
+  var author = log_data.match(/author:\s+([^<]+)/i)[1];
+  var date = log_data.match(/date:\s+(.+)/i)[1];
+
+  var gitwebUrl = gen_gitweb_url(commit);
+  var start = log_data.indexOf(date) + date.length;
+  var end   = log_data.length - 1;
+  var msg   = log_data.substring(start, end);
+
+  var comment = 'Commit : '+ commit + '\nIn branch : ' + branch + '\nFrom : '+ author + '\n[' + gitwebUrl + ']\t' + msg;
+  return comment;
+}
+
+function gen_gitweb_url(commit){
+  var url = gitweb_addr + repo_name + '/commit/' + commit;
+  return url;
+}
+
+function find_list_id_via_name(list_name){
+  var list_id;
+  for (i = 0; i < trello_lists.length; i++){
+    if(list_name.toLowerCase() === trello_lists[i].name.toLowerCase()){
+      list_id = trello_lists[i].id;
+      break;
+    }
+  }
+  return list_id;
+}
+
+function find_list_name_via_id(list_id){
+  var list_name;
+  for (i = 0; i < trello_lists.length; i++){
+    if(list_id === trello_lists[i].id){
+      list_name = trello_lists[i].name;
+      break;
+    }
+  }
+  return list_name;
+}
+
+function find_list_index_via_id(list_id){
+  var index;
+  for (i = 0; i < trello_lists.length; i++){
+    if(list_id === trello_lists[i].id){
+      index = i;
+      break;
+    }
+  }
+  return index;
+}
+
+var partition      = "--------------------------------------------------------------";
+var partition_star = "**************************************************************";
+function info(msg){
+  if(log_progress){
+    console.log(partition);
+    console.log(msg);
+    console.log(partition);
+  }
+}
+
+function info_star(msg){
+  console.log(partition_star);
+  console.log(msg);
+  console.log(partition_star);
+}
+
+function warn(msg){
+  console.warn(partition);
+  console.warn(msg);
+  console.warn(partition);
+}
+
+function logfun(err, data){
+  if(err) throw err;
+  console.log(data);
+}
+
+function get_card(board_id, card_id, fun){
+  fun = fun || logfun;
+  t.get("/1/boards/"+ board_id +"/cards/"+card_id, fun);
+}
+
+function update_card(card_id, params, fun){
+  fun = fun || logfun;
+  t.put("/1/cards/"+card_id, params, fun);
+}
+
+function add_comment(card_id, comment, fun ){
+  fun = fun || logfun;
+  t.post("/1/cards/"+card_id+ "/actions/comments", {text: comment}, fun);
+}
+
+function get_cards(list_id, fun){
+  fun = fun || logfun;
+  t.get("/1/lists/"+list_id+"/cards", {fields: "idList,closed,name"}, fun)
+}
+
+function get_lists(board_id, fun){
+  fun = fun || logfun;
+  t.get("/1/boards/"+board_id+"/lists", {fields: "idList,name"}, fun)
+}
