@@ -8,7 +8,7 @@ var token = "d3fad052c71314ba9a1a293cb9ea84d02470160c87f43bb889d5bb7b5cd2cf4e";
 //xface-3 board:https://trello.com/board/-/5112231876087abe0a006a87
 var board_id = "5112231876087abe0a006a87";
 
-var Trello = require("node-trello");
+var Trello = require('node-trello');
 var t = new Trello(key, token);
 var exec = require('child_process').exec;
 var spawn = require('child_process').spawn;
@@ -36,7 +36,6 @@ var current_loop = 1;
 var elapsed = 0;
 var query_callback_is_called = false;
 var log_progress = false;
-var commitBranch;
 var git_log;
 var ref;
 var trello_lists = [{"id":"5147d4203db401a67f0010a3","name":"Internal Wishlist"},
@@ -45,9 +44,8 @@ var trello_lists = [{"id":"5147d4203db401a67f0010a3","name":"Internal Wishlist"}
 {"id":"5112231876087abe0a006a8a","name":"Done"}];
 
 function start(){
-	ref = process.argv[4];
-	commitBranch = ref.replace('refs/heads/', '');
-	git_log = spawn('git', ['log' , commitBranch, '-1' , '--decorate=full']);
+  ref = process.argv[2];
+  git_log = spawn('git', ['show' , process.argv[4]]);
 }
 
 start();
@@ -75,6 +73,8 @@ function git_log_exit_callback(){
     get_repo_name();
 
     setTimer();
+  }else{
+    quit();
   }
 }
 
@@ -115,6 +115,7 @@ function get_card_callback(err, data){
 function get_repo_name_callback(err, stdout, stderr){
   if(err) throw err;
   repo_name += stdout;
+  repo_name = repo_name.replace('.git', '');
   repo_name = repo_name.replace(/\n$/, '');
 
   query_callback();
@@ -165,7 +166,7 @@ function clearTimer(){
 }
 
 function quit(){
-  clearInterval(timer);
+  if(timer) clearInterval(timer);
   process.exit(0);
 }
 
@@ -257,15 +258,14 @@ function is_close_cmd(cmd){
 }
 
 function gen_comment(){
-  var commit_line = log_data.match(/commit\s+(.+)/i)[1];
-  var commit = commit_line.match(/(.+)\s+\(/)[1];
+  var commit = log_data.match(/commit\s+(.+)/i)[1];
   var branch = ref;
   var author = log_data.match(/author:\s+([^<]+)/i)[1];
   var date = log_data.match(/date:\s+(.+)/i)[1];
 
   var gitwebUrl = gen_gitweb_url(commit);
   var start = log_data.indexOf(date) + date.length;
-  var end   = log_data.length - 1;
+  var end   = log_data.indexOf('diff --git');
   var msg   = log_data.substring(start, end);
 
   var comment = 'Commit : '+ commit + '\nIn branch : ' + branch + '\nFrom : '+ author + '\n[' + gitwebUrl + ']\t' + msg;
